@@ -38,7 +38,7 @@ Calibration []	                                    [string factor: Yes/No/Unknow
 import os
 import glob
 import numpy as np
-import echopype as ep ## version echopype-0.8.3
+import echopype as ep ## version 0.7.1
 import pandas as pd  
 from collections import defaultdict
 
