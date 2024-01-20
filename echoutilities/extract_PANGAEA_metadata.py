@@ -42,6 +42,17 @@ import echopype as ep ## version 0.7.1
 import pandas as pd  
 from collections import defaultdict
 
+# funcs
+def get_value(obj):
+    co_ords = list(obj.coords.keys())
+    if 'channel' in co_ords and 'ping_time' in co_ords: # by freq and ping
+        value = obj.loc[dict(channel=all_channels[i])].data[ref_ping]
+    elif 'channel' in co_ords: ## by freq
+        value = obj.loc[dict(channel=all_channels[i])].data
+    else: # single value
+        value = float(obj.data)
+    return value
+
 # paras
 path_to_data       = 'path_to_raw_files'
 cruise_label       = "SURVEY_YEAR" # Cruise label (ask PANGAEA)
@@ -57,18 +68,27 @@ file_names = np.sort(glob.glob("*.raw"))
 # dictionary to hold metadata
 metadata = defaultdict(list)
 
+# bad/corrupt files list
+badfiles = []
+
 # file index
 for file_idx in range(len(file_names)):
+    print(file_idx)
     print("processing: " + file_names[file_idx])
 
-    # read file (only CW data recorded using either EK60 or EK80)
+    # read file (only CW data recorded using either EK60 or EK80 or similar eg ES70)
     raw_type = 'EK60'
     try:
         ek = ep.open_raw(file_names[file_idx], sonar_model= raw_type)
     except:
-        raw_type = 'EK80'
-        ek       = ep.open_raw(file_names[file_idx], sonar_model= raw_type)
-    
+        try:
+            raw_type = 'EK80'
+            ek       = ep.open_raw(file_names[file_idx], sonar_model= raw_type)
+        except:
+            print("can not read file: " + file_names[file_idx])
+            badfiles.append(file_names[file_idx])
+            continue
+        
     # freqs and channels
     all_frequencies = ek['Sonar/Beam_group1']['frequency_nominal'].data
     all_channels    = ek['Sonar/Beam_group1'].coords['channel'].data
@@ -78,15 +98,20 @@ for file_idx in range(len(file_names)):
         Sv_obj = ep.calibrate.compute_Sv(ek,waveform_mode = "CW", encode_mode = "power") 
         print('Power and angle data used to calculate Sv...')
     except:
-        Sv_obj = ep.calibrate.compute_Sv(ek,waveform_mode = "CW", encode_mode = "complex")
-        print('Complex data used to calculate Sv...')
+        try:
+            Sv_obj = ep.calibrate.compute_Sv(ek,waveform_mode = "CW", encode_mode = "complex")
+            print('Complex data used to calculate Sv...')
+        except:
+            print("can not process file: " + file_names[file_idx])
+            badfiles.append(file_names[file_idx])
+            continue
                 
     # metadata
     software              = ek['Sonar'].sonar_software_name + ' v' +ek['Sonar'].sonar_software_version
     npings                = len(Sv_obj['Sv'].coords['ping_time'])
     max_recording_range   = np.round(np.nanmax(Sv_obj['echo_range'].data),5)
     
-    # get GPS info
+    ############################################################## get GPS info
     gps            = {}
     sentence_types = np.array(ek['Platform']['sentence_type'].data)
     all_lats       = np.array(ek['Platform']['latitude'].data)
@@ -104,47 +129,52 @@ for file_idx in range(len(file_names)):
             gps['longitude'] = all_lons[idx]
             break
         
-    ## gets start/end fixes
-    gps_start_dt = gps['time'][0]
-    gps_end_dt   = gps['time'][-1]
+    gps_start_dt = None
+    gps_end_dt   = None
+    if 'time' in gps.keys():
+        ## gets start/end fixes
+        gps_start_dt = gps['time'][0]
+        gps_end_dt   = gps['time'][-1]
     
-    ## for positions, take median over first few and last fixes
-    value_range   = min(10,len(gps['time'])/2 -1)
-    value_range   = max(value_range,1)
-    gps_start_lat = np.round(np.nanmedian(gps['latitude'][:value_range]),5)
-    gps_end_lat   = np.round(np.nanmedian(gps['latitude'][-value_range:]),5)
-    gps_start_lon = np.round(np.nanmedian(gps['longitude'][:value_range]),5)
-    gps_end_lon   = np.round(np.nanmedian(gps['longitude'][-value_range:]),5)
+    gps_start_lat = None
+    gps_end_lat   = None
+    gps_start_lon = None
+    gps_end_lon   = None
+    if 'latitude' in gps.keys():
+        ## for positions, take median over first few and last fixes
+        value_range   = int(min(10,len(gps['time'])/2 -1))
+        value_range   = max(value_range,1)
+        gps_start_lat = np.round(np.nanmedian(gps['latitude'][:value_range]),5)
+        gps_end_lat   = np.round(np.nanmedian(gps['latitude'][-value_range:]),5)
+        gps_start_lon = np.round(np.nanmedian(gps['longitude'][:value_range]),5)
+        gps_end_lon   = np.round(np.nanmedian(gps['longitude'][-value_range:]),5)
+        
+    ###########################################################################
               
     # metadata by channel
     for i in range(len(all_frequencies)):
         # by channel metadata
-        pulse_duration        = ek['Sonar/Beam_group1']['transmit_duration_nominal'].loc[dict(channel=all_channels[i])].data[ref_ping]
-        pulse_duration        = round(pulse_duration,6)
-        sample_interval       = ek['Sonar/Beam_group1']['sample_interval'].loc[dict(channel=all_channels[i])].data[ref_ping]
-        sample_interval       = round(sample_interval,7)
-        transmit_power        = ek['Sonar/Beam_group1']['transmit_power'].loc[dict(channel=all_channels[i])].data[ref_ping]
+        pulse_duration  = round(ek['Sonar/Beam_group1']['transmit_duration_nominal'].loc[dict(channel=all_channels[i])].data[ref_ping],6)
+        sample_interval = round(ek['Sonar/Beam_group1']['sample_interval'].loc[dict(channel=all_channels[i])].data[ref_ping],7)
+        transmit_power  = round(ek['Sonar/Beam_group1']['transmit_power'].loc[dict(channel=all_channels[i])].data[ref_ping])
         
         # CHECK
         try:
+            beamwidth_alongship   = np.round(get_value(Sv_obj['beamwidth_alongship']),5)
+            beamwidth_athwartship = np.round(get_value(Sv_obj['beamwidth_athwartship']),5)
+        except:
             beamwidth_alongship   = np.round(float(ek['Sonar/Beam_group1']['beamwidth_twoway_alongship'].loc[dict(channel=all_channels[i])].data[ref_ping]),5)
             beamwidth_athwartship = np.round(float(ek['Sonar/Beam_group1']['beamwidth_twoway_athwartship'].loc[dict(channel=all_channels[i])].data[ref_ping]),5)
-        except:
-            beamwidth_alongship   = Sv_obj['beamwidth_alongship'].loc[dict(channel=all_channels[i])].data[ref_ping]
-            beamwidth_athwartship = Sv_obj['beamwidth_athwartship'].loc[dict(channel=all_channels[i])].data[ref_ping]
+
         ## calibration
-        gain                  = Sv_obj['gain_correction'].loc[dict(channel=all_channels[i])].data[ref_ping]
-        Sa                    = Sv_obj['sa_correction'].loc[dict(channel=all_channels[i])].data[ref_ping]
-        # CHECK
-        try:
-            sound_speed           = np.round(float(Sv_obj['sound_speed'].data),5)
-            sound_absorption      = np.round(float(Sv_obj['sound_absorption'].data),8)
-            transducer_depth      = np.round(Sv_obj['water_level'].data[0],5) ## CHECK
-        except:
-            sound_speed           = np.round(Sv_obj['sound_speed'].loc[dict(channel=all_channels[i])].data[ref_ping],5)
-            sound_absorption      = np.round(Sv_obj['sound_absorption'].loc[dict(channel=all_channels[i])].data[ref_ping],8)
-            transducer_depth      = np.round(float(Sv_obj['water_level'].loc[dict(channel=all_channels[i])].data[ref_ping]),5) ## CHECK
-    
+        gain = np.round(Sv_obj['gain_correction'].loc[dict(channel=all_channels[i])].data[ref_ping],5)
+        Sa   = np.round(Sv_obj['sa_correction'].loc[dict(channel=all_channels[i])].data[ref_ping],5)
+        
+        ## env
+        transducer_depth = np.round(get_value(Sv_obj['water_level']),5) ## CHECK
+        sound_speed      = np.round(get_value(Sv_obj['sound_speed']),5)
+        sound_absorption = np.round(get_value(Sv_obj['sound_absorption']),8)
+
         # add to dictionary
         metadata['Event'].append(cruise_label)
         metadata['Echogram, raw format []'].append(file_names[file_idx])
@@ -177,9 +207,18 @@ for file_idx in range(len(file_names)):
 pd.options.display.float_format = '{:.0f}'.format
 df = pd.DataFrame.from_dict(metadata)
 
+# add bad files
+for i in range(len(badfiles)):      
+    df.at[len(df),'Echogram, raw format []'] = badfiles[i]
+    df.at[len(df)-1,'Event']                 = "BADFILE"
+
 ## to file
 df.to_csv(cruise_label + "_metadata.csv", index=False,  float_format= '%f', date_format='%d/%m/%Y %H:%M:%S')
 
-
+# CHECK filenames in output
+#df = pd.read_csv(cruise_label + "_metadata.csv")
+#for f in file_names:
+#    if f not in np.array(df['Echogram, raw format []']):
+#        print(f)
 
 
