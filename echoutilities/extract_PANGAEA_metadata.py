@@ -195,10 +195,10 @@ for file_idx in range(len(file_names)):
         metadata['Depth, water, bottom/maximum [m]'].append(max_recording_range + transducer_depth)
         metadata['DEPTH, water [m]'].append(transducer_depth + max_recording_range/2)
         metadata['Date/time start []'].append(gps_start_dt)
-        metadata['Date/time end []	'].append(gps_end_dt)
+        metadata['Date/time end []'].append(gps_end_dt)
         metadata['Latitude []'].append(gps_start_lat)
         metadata['Latitude 2 []'].append(gps_end_lat)
-        metadata['Longitude []	'].append(gps_start_lon)
+        metadata['Longitude []'].append(gps_start_lon)
         metadata['Longitude 2 []'].append(gps_end_lon)
         metadata['Calibration []'].append(calibration_status)
     
