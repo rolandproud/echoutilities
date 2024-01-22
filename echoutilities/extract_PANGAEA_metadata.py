@@ -213,7 +213,7 @@ for i in range(len(badfiles)):
     df.at[len(df)-1,'Event']                 = "BADFILE"
 
 ## to file
-df.to_csv(cruise_label + "_metadata.csv", index=False,  float_format= '%f', date_format='%d/%m/%Y %H:%M:%S')
+df.to_csv(cruise_label + "_metadata.csv", index=False,  float_format= '%f', date_format='%Y-%m-%dT%H:%M:%S')
 
 # CHECK filenames in output
 #df = pd.read_csv(cruise_label + "_metadata.csv")
